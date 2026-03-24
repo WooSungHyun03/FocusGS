@@ -81,16 +81,16 @@ class OptimizationParams(ParamGroup):
         self.opacity_lr = 0.05
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
-        self.mask_label_lr = 0.01
+        self.objectmark_score_lr = 0.01
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
         self.lambda_dist = 0.0
         self.lambda_normal = 0.05
-        self.lambda_bg = 0.1
-        self.lambda_mask_foreground = 0.2
-        self.lambda_mask_background = 0.8
-        self.mask_label_from_iter = 0
-        self.mask_label_prune_threshold = 0.5
+        self.lambda_polarization = 0.1
+        self.lambda_objectmark_foreground = 0.2
+        self.lambda_objectmark_background = 0.8
+        self.objectmark_guidance_from_iter = 0
+        self.objectmark_pruning_threshold = 0.5
         self.opacity_cull = 0.05
         self.disable_mask_l1 = False
 

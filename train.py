@@ -37,19 +37,25 @@ def masked_l1_loss(pred, target, mask, eps=1e-6):
     return weighted_abs.sum() / denom
 
 
-def compute_bg_alpha_loss(rendered_alpha, fg_mask):
+def compute_polarization_loss(rendered_alpha, fg_mask):
     rendered_alpha = rendered_alpha.clamp(0.0, 1.0)
     fg_mask = fg_mask.float()
     return (rendered_alpha * (1.0 - fg_mask) + (1.0 - rendered_alpha) * fg_mask).mean()
 
 
-def compute_mask_label_loss(rendered_mask_label, gt_mask, lambda_mask_foreground, lambda_mask_background, eps=1e-6):
+def compute_objectmark_guidance_loss(
+    rendered_objectmark_score,
+    gt_mask,
+    lambda_objectmark_foreground,
+    lambda_objectmark_background,
+    eps=1e-6,
+):
     gt_mask = gt_mask.float()
-    foreground_term = (gt_mask * rendered_mask_label).sum()
-    background_term = ((1.0 - gt_mask) * rendered_mask_label).sum()
+    foreground_term = (gt_mask * rendered_objectmark_score).sum()
+    background_term = ((1.0 - gt_mask) * rendered_objectmark_score).sum()
     return (
-        -lambda_mask_foreground * foreground_term
-        + lambda_mask_background * background_term
+        -lambda_objectmark_foreground * foreground_term
+        + lambda_objectmark_background * background_term
     ) / (gt_mask.numel() + eps)
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint):
@@ -65,23 +71,20 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-    mask_label_background = torch.zeros_like(background)
+    objectmark_score_background = torch.zeros_like(background)
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0
-    ema_bg_alpha_for_log = 0.0
-    ema_mask_label_for_log = 0.0
+    ema_polarization_loss_for_log = 0.0
+    ema_objectmark_guidance_loss_for_log = 0.0
     ema_dist_for_log = 0.0
     ema_normal_for_log = 0.0
-    mask_label_prune_iterations = {int(iter_i) for iter_i in opt.mask_label_prune_iterations}
+    objectmark_pruning_iterations = {int(iter_i) for iter_i in opt.objectmark_pruning_iterations}
     vram_log_path = os.path.join(dataset.model_path, "train_vram.txt")
     gs_log_path = os.path.join(dataset.model_path, "gs.txt")
-    mask_log_path = os.path.join(dataset.model_path, "mask.txt")
-    if os.path.exists(mask_log_path):
-        os.remove(mask_log_path)
     max_num_gaussians = 0
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
@@ -117,34 +120,34 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             loss = Ll1
 
-            bg_alpha_loss = None
-            if gt_mask is not None and opt.lambda_bg > 0.0:
-                rendered_alpha = render_pkg["rend_alpha"]
-                bg_alpha_loss = compute_bg_alpha_loss(rendered_alpha, gt_mask)
-                loss = loss + opt.lambda_bg * bg_alpha_loss
+            polarization_loss = None
+            if gt_mask is not None and opt.lambda_polarization > 0.0:
+                rendered_alpha = render_pkg["polarization_alpha"]
+                polarization_loss = compute_polarization_loss(rendered_alpha, gt_mask)
+                loss = loss + opt.lambda_polarization * polarization_loss
 
-            mask_label_loss = None
+            objectmark_guidance_loss = None
             if (
                 gt_mask is not None
-                and iteration >= opt.mask_label_from_iter
-                and (opt.lambda_mask_foreground > 0.0 or opt.lambda_mask_background > 0.0)
+                and iteration >= opt.objectmark_guidance_from_iter
+                and (opt.lambda_objectmark_foreground > 0.0 or opt.lambda_objectmark_background > 0.0)
             ):
-                mask_override_color = gaussians.get_mask_label.repeat(1, 3)
-                mask_render_pkg = render(
+                objectmark_score_override = gaussians.get_objectmark_score.repeat(1, 3)
+                objectmark_render_pkg = render(
                     viewpoint_cam,
                     gaussians,
                     pipe,
-                    mask_label_background,
-                    override_color=mask_override_color,
+                    objectmark_score_background,
+                    override_color=objectmark_score_override,
                 )
-                rendered_mask_label = mask_render_pkg["render"][0:1].clamp(0.0, 1.0)
-                mask_label_loss = compute_mask_label_loss(
-                    rendered_mask_label,
+                rendered_objectmark_score = objectmark_render_pkg["render"][0:1].clamp(0.0, 1.0)
+                objectmark_guidance_loss = compute_objectmark_guidance_loss(
+                    rendered_objectmark_score,
                     gt_mask,
-                    opt.lambda_mask_foreground,
-                    opt.lambda_mask_background,
+                    opt.lambda_objectmark_foreground,
+                    opt.lambda_objectmark_background,
                 )
-                loss = loss + mask_label_loss
+                loss = loss + objectmark_guidance_loss
 
             # regularization
             lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
@@ -167,10 +170,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             with torch.no_grad():
                 # Progress bar
                 ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
-                if bg_alpha_loss is not None:
-                    ema_bg_alpha_for_log = 0.4 * bg_alpha_loss.item() + 0.6 * ema_bg_alpha_for_log
-                if mask_label_loss is not None:
-                    ema_mask_label_for_log = 0.4 * mask_label_loss.item() + 0.6 * ema_mask_label_for_log
+                if polarization_loss is not None:
+                    ema_polarization_loss_for_log = 0.4 * polarization_loss.item() + 0.6 * ema_polarization_loss_for_log
+                if objectmark_guidance_loss is not None:
+                    ema_objectmark_guidance_loss_for_log = 0.4 * objectmark_guidance_loss.item() + 0.6 * ema_objectmark_guidance_loss_for_log
                 ema_dist_for_log = 0.4 * dist_loss.item() + 0.6 * ema_dist_for_log
                 ema_normal_for_log = 0.4 * normal_loss.item() + 0.6 * ema_normal_for_log
 
@@ -182,10 +185,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                         "normal": f"{ema_normal_for_log:.{5}f}",
                         "Points": f"{len(gaussians.get_xyz)}"
                     }
-                    if gt_mask is not None and opt.lambda_bg > 0.0:
-                        loss_dict["bg_alpha"] = f"{ema_bg_alpha_for_log:.{5}f}"
-                    if gt_mask is not None and iteration >= opt.mask_label_from_iter and (opt.lambda_mask_foreground > 0.0 or opt.lambda_mask_background > 0.0):
-                        loss_dict["mask_label"] = f"{ema_mask_label_for_log:.{5}f}"
+                    if gt_mask is not None and opt.lambda_polarization > 0.0:
+                        loss_dict["Polarization Loss"] = f"{ema_polarization_loss_for_log:.{5}f}"
+                    if gt_mask is not None and iteration >= opt.objectmark_guidance_from_iter and (opt.lambda_objectmark_foreground > 0.0 or opt.lambda_objectmark_background > 0.0):
+                        loss_dict["ObjectMark Guidance Loss"] = f"{ema_objectmark_guidance_loss_for_log:.{5}f}"
                     progress_bar.set_postfix(loss_dict)
 
                     progress_bar.update(10)
@@ -196,10 +199,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 if tb_writer is not None:
                     tb_writer.add_scalar('train_loss_patches/dist_loss', ema_dist_for_log, iteration)
                     tb_writer.add_scalar('train_loss_patches/normal_loss', ema_normal_for_log, iteration)
-                    if bg_alpha_loss is not None:
-                        tb_writer.add_scalar('train_loss_patches/bg_alpha_loss', bg_alpha_loss.item(), iteration)
-                    if mask_label_loss is not None:
-                        tb_writer.add_scalar('train_loss_patches/mask_label_loss', mask_label_loss.item(), iteration)
+                    if polarization_loss is not None:
+                        tb_writer.add_scalar('train_loss_patches/Polarization Loss', polarization_loss.item(), iteration)
+                    if objectmark_guidance_loss is not None:
+                        tb_writer.add_scalar('train_loss_patches/ObjectMark Guidance Loss', objectmark_guidance_loss.item(), iteration)
 
                 training_report(tb_writer, iteration, Ll1, total_loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
                 if (iteration in saving_iterations):
@@ -219,10 +222,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                         gaussians.reset_opacity()
 
-                if iteration in mask_label_prune_iterations:
-                    n_pruned = gaussians.prune_background_by_mask_label(opt.mask_label_prune_threshold)
+                if iteration in objectmark_pruning_iterations:
+                    n_pruned = gaussians.prune_background_by_objectmark_score(opt.objectmark_pruning_threshold)
                     if n_pruned > 0:
-                        print("\n[ITER {}] Pruned {} background gaussians by mask_label".format(iteration, n_pruned))
+                        print("\n[ITER {}] ObjectMark Pruning removed {} gaussians".format(iteration, n_pruned))
 
                 # Optimizer step
                 if iteration < opt.iterations:
@@ -324,12 +327,12 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                         tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
 
                         try:
-                            rend_alpha = render_pkg['rend_alpha']
+                            polarization_alpha = render_pkg['polarization_alpha']
                             rend_normal = render_pkg["rend_normal"] * 0.5 + 0.5
                             surf_normal = render_pkg["surf_normal"] * 0.5 + 0.5
                             tb_writer.add_images(config['name'] + "_view_{}/rend_normal".format(viewpoint.image_name), rend_normal[None], global_step=iteration)
                             tb_writer.add_images(config['name'] + "_view_{}/surf_normal".format(viewpoint.image_name), surf_normal[None], global_step=iteration)
-                            tb_writer.add_images(config['name'] + "_view_{}/rend_alpha".format(viewpoint.image_name), rend_alpha[None], global_step=iteration)
+                            tb_writer.add_images(config['name'] + "_view_{}/polarization_alpha".format(viewpoint.image_name), polarization_alpha[None], global_step=iteration)
 
                             rend_dist = render_pkg["rend_dist"]
                             rend_dist = colormap(rend_dist.cpu().numpy()[0])
@@ -367,7 +370,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--vram_log_interval", type=int, default=100)
-    parser.add_argument("--mask_label_prune_iterations", nargs="+", type=int, default=[5000, 10_000, 15_000, 20_000, 25_000, 30_000])
+    parser.add_argument("--objectmark_pruning_iterations", nargs="+", type=int, default=[5000, 10_000, 15_000, 20_000, 25_000, 30_000])
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
 
@@ -383,7 +386,7 @@ if __name__ == "__main__":
     opt = op.extract(args)
     pipe = pp.extract(args)
     opt.vram_log_interval = args.vram_log_interval
-    opt.mask_label_prune_iterations = args.mask_label_prune_iterations
+    opt.objectmark_pruning_iterations = args.objectmark_pruning_iterations
     training(dataset, opt, pipe, args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint)
 
     # All done

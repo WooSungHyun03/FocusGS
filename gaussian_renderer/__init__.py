@@ -115,7 +115,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
 
     # additional regularizations
-    render_alpha = allmap[1:2]
+    polarization_alpha = allmap[1:2]
 
     # get normal map
     # transform normal from view space to world space
@@ -128,7 +128,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # get expected depth map
     render_depth_expected = allmap[0:1]
-    render_depth_expected = (render_depth_expected / render_alpha)
+    render_depth_expected = (render_depth_expected / polarization_alpha)
     render_depth_expected = torch.nan_to_num(render_depth_expected, 0, 0)
     
     # get depth distortion map
@@ -144,11 +144,12 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     surf_normal = depth_to_normal(viewpoint_camera, surf_depth)
     surf_normal = surf_normal.permute(2,0,1)
     # remember to multiply with accum_alpha since render_normal is unnormalized.
-    surf_normal = surf_normal * (render_alpha).detach()
+    surf_normal = surf_normal * (polarization_alpha).detach()
 
 
     rets.update({
-            'rend_alpha': render_alpha,
+            'polarization_alpha': polarization_alpha,
+            'rend_alpha': polarization_alpha,
             'rend_normal': render_normal,
             'rend_dist': render_dist,
             'surf_depth': surf_depth,

@@ -41,7 +41,7 @@ def colormap(map, cmap="turbo"):
 def render_net_image(render_pkg, render_items, render_mode, camera):
     output = render_items[render_mode].lower()
     if output == 'alpha':
-        net_image = render_pkg["rend_alpha"]
+        net_image = render_pkg["polarization_alpha"]
     elif output == 'normal':
         net_image = render_pkg["rend_normal"]
         net_image = (net_image+1)/2
