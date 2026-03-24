@@ -9,12 +9,37 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+import os
+
+from PIL import Image
+import torch
+
 from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
 
 WARNED = False
+
+
+def _load_dataset_mask(args, cam_info, resolution):
+    mask_dir = os.path.join(args.source_path, "mask")
+    if not os.path.isdir(mask_dir):
+        return None
+
+    image_basename = os.path.basename(cam_info.image_path)
+    candidates = [os.path.join(mask_dir, image_basename)]
+    for extension in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"):
+        candidates.append(os.path.join(mask_dir, cam_info.image_name + extension))
+
+    mask_path = next((path for path in candidates if os.path.isfile(path)), None)
+    if mask_path is None:
+        return None
+
+    resample_nearest = Image.Resampling.NEAREST if hasattr(Image, "Resampling") else Image.NEAREST
+    mask_image = Image.open(mask_path).convert("L").resize(resolution, resample=resample_nearest)
+    mask_array = torch.from_numpy(np.array(mask_image)).float().unsqueeze(0) / 255.0
+    return mask_array
 
 def loadCam(args, id, cam_info, resolution_scale):
     orig_w, orig_h = cam_info.image.size
@@ -38,14 +63,16 @@ def loadCam(args, id, cam_info, resolution_scale):
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
 
+    loaded_mask = _load_dataset_mask(args, cam_info, resolution)
+
     if len(cam_info.image.split()) > 3:
         import torch
         resized_image_rgb = torch.cat([PILtoTorch(im, resolution) for im in cam_info.image.split()[:3]], dim=0)
-        loaded_mask = PILtoTorch(cam_info.image.split()[3], resolution)
+        if loaded_mask is None:
+            loaded_mask = PILtoTorch(cam_info.image.split()[3], resolution)
         gt_image = resized_image_rgb
     else:
         resized_image_rgb = PILtoTorch(cam_info.image, resolution)
-        loaded_mask = None
         gt_image = resized_image_rgb
 
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 

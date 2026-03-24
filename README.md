@@ -1,10 +1,18 @@
-# 2D Gaussian Splatting for Geometrically Accurate Radiance Fields
+# FocusGS
 
 [Project page](https://surfsplatting.github.io/) | [Paper](https://arxiv.org/pdf/2403.17888) | [Video](https://www.youtube.com/watch?v=oaHCtB6yiKU) | [Surfel Rasterizer (CUDA)](https://github.com/hbb1/diff-surfel-rasterization) | [Surfel Rasterizer (Python)](https://colab.research.google.com/drive/1qoclD7HJ3-o0O1R8cvV3PxLhoDCMsH8W?usp=sharing) | [DTU+COLMAP (3.5GB)](https://drive.google.com/drive/folders/1SJFgt8qhQomHX55Q4xSvYE2C6-8tFll9) | [SIBR Viewer Pre-built for Windows](https://github.com/RongLiu-Leo/Gaussian-Splatting-Monitor/releases/download/v1.0/GS_Monitor.zip) | [Web Viewer](https://github.com/mkkellogg/GaussianSplats3D) <br>
 
 ![Teaser image](assets/teaser.jpg)
 
-This repo contains the official implementation for the paper "2D Gaussian Splatting for Geometrically Accurate Radiance Fields". Our work represents a scene with a set of 2D oriented disks (surface elements) and rasterizes the surfels with [perspective correct differentiable raseterization](https://colab.research.google.com/drive/1qoclD7HJ3-o0O1R8cvV3PxLhoDCMsH8W?usp=sharing). Our work also develops regularizations that enhance the reconstruction quality. We also devise meshing approaches for Gaussian splatting.
+FocusGS is a derivative research implementation built on top of [hbb1/2d-gaussian-splatting](https://github.com/hbb1/2d-gaussian-splatting) and, transitively, [graphdeco-inria/gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting). This repository keeps the upstream Gaussian-Splatting license and adds mask-aware training and pruning utilities for foreground-focused reconstruction.
+
+This repository is distributed for non-commercial research and evaluation under the terms in [LICENSE.md](LICENSE.md). See [NOTICE.md](NOTICE.md) for attribution, upstream dependencies, and derivative-work details.
+
+## FocusGS Highlights
+- Adds optional dataset mask loading from `<dataset>/mask`.
+- Adds masked RGB supervision, alpha regularization, and per-Gaussian mask-label learning.
+- Adds mask-label-based pruning for removing background Gaussians during training.
+- Keeps checkpoint and PLY loading backward-compatible when `mask_label` is absent.
 
 
 ## ⭐ New Features 
@@ -65,12 +73,12 @@ python view.py -s <path to COLMAP or NeRF Synthetic dataset> -m <path to trained
 
 ```bash
 # download
-git clone https://github.com/hbb1/2d-gaussian-splatting.git --recursive
+git clone https://github.com/WooSungHyun03/FocusGS.git --recursive
 
 # if you have an environment used for 3dgs, use it
 # if not, create a new environment
 conda env create --file environment.yml
-conda activate surfel_splatting
+conda activate focusgs
 ```
 ## Training
 To train a scene, simply use
@@ -195,11 +203,11 @@ F1 scores on TnT dataset (higher is better)
 - **Can 3DGS's viewer be used to visualize 2DGS?** Technically, you can export 2DGS to 3DGS's ply file by appending an additional zero scale. However, due to the inaccurate affine projection of 3DGS's viewer, you may see some distorted artefacts. We are currently working on a viewer for 2DGS, so stay tuned for updates.
 
 ## Acknowledgements
-This project is built upon [3DGS](https://github.com/graphdeco-inria/gaussian-splatting). The TSDF fusion for extracting mesh is based on [Open3D](https://github.com/isl-org/Open3D). The rendering script for MipNeRF360 is adopted from [Multinerf](https://github.com/google-research/multinerf/), while the evaluation scripts for DTU and Tanks and Temples dataset are taken from [DTUeval-python](https://github.com/jzhangbs/DTUeval-python) and [TanksAndTemples](https://github.com/isl-org/TanksAndTemples/tree/master/python_toolbox/evaluation), respectively. The fusing operation for accelerating the renderer is inspired by [Han's repodcue](https://github.com/Han230104/2D-Gaussian-Splatting-Reproduce). We thank all the authors for their great repos. 
+FocusGS is a derivative work of [2DGS](https://github.com/hbb1/2d-gaussian-splatting), which itself builds upon [3DGS](https://github.com/graphdeco-inria/gaussian-splatting). The TSDF fusion for extracting mesh is based on [Open3D](https://github.com/isl-org/Open3D). The rendering script for MipNeRF360 is adopted from [Multinerf](https://github.com/google-research/multinerf/), while the evaluation scripts for DTU and Tanks and Temples dataset are taken from [DTUeval-python](https://github.com/jzhangbs/DTUeval-python) and [TanksAndTemples](https://github.com/isl-org/TanksAndTemples/tree/master/python_toolbox/evaluation), respectively. The fusing operation for accelerating the renderer is inspired by [Han's repodcue](https://github.com/Han230104/2D-Gaussian-Splatting-Reproduce). Unmodified upstream files remain under their original copyright and license notices. See [NOTICE.md](NOTICE.md) for redistribution details.
 
 
 ## Citation
-If you find our code or paper helps, please consider citing:
+If you use FocusGS, please cite the original 2DGS paper below and acknowledge this repository:
 ```bibtex
 @inproceedings{Huang2DGS2024,
     title={2D Gaussian Splatting for Geometrically Accurate Radiance Fields},
